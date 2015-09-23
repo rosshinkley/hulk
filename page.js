@@ -1,11 +1,12 @@
-var path = require('path');
-var fm = require('front-matter');
-var mkdirp = require('mkdirp');
-var fs = require('fs');
-var _ = require('lodash');
-var converters = require('./converters');
+var path = require('path'),
+    fm = require('front-matter'),
+    _ = require('lodash'),
+    converters = require('./converters'),
+    Promise = require('bluebird'),
+    mkdirp = Promise.promisify(require('mkdirp')),
+    fs = Promise.promisifyAll(require('fs'));
 
-var Page = function (site, filePath, content) {
+var Page = function(site, filePath, content) {
     this.filePath = filePath;
     this.site = site;
 
@@ -31,29 +32,22 @@ var Page = function (site, filePath, content) {
     // that matches the relative path of the page.
     if (this._originalFrontMatter.url) {
         this.url = this.templateData.url = this._originalFrontMatter.url;
-    }
-    else {
+    } else {
         this.url = this.templateData.url = path.relative(site.source, filePath);
     }
 };
 
 var p = Page.prototype;
 
-p.render = function (layouts, siteTemplateData, callback) {
-    var err;
-    try {
-        var page = this;
-
+p.render = function(layouts, siteTemplateData) {
+    var page = this;
+    return new Promise(function(resolve, reject) {
         var data = {
             site: siteTemplateData,
             page: page.templateData
         };
-
-        var converter = converters.getConverter(page);
-        if (!converter) {
-            // Fallback to using a default basic converter.
-            converter = converters.default;
-        }
+        //use the page converter if it exists.  If not, use the default.
+        var converter = converters.getConverter(page) || converters.default;
 
         // Save the page's rendered content (minus layout)
         // into the page's template data.
@@ -65,19 +59,14 @@ p.render = function (layouts, siteTemplateData, callback) {
         if (layout) {
             // Render the page's content into the layout that should be used.
             page.content = layout.render(pageHtml, data);
-        }
-        else {
+        } else {
             page.content = pageHtml;
         }
-    }
-    catch (err2) {
-        console.log('Error rendering page: ' + page.filePath);
-        err = err2;
-    }
-    callback(err);
+        return resolve();
+    });
 };
 
-p.destination = function (destPath) {
+p.destination = function(destPath) {
 
     // Add 'index.html' to the URL if needed.
     var url = this.url;
@@ -88,19 +77,11 @@ p.destination = function (destPath) {
     return path.join(this.site.source, path.join(destPath, url));
 };
 
-p.write = function (destination, callback) {
+p.write = function(destination) {
     var destPath = this.destination(destination);
     var page = this;
-    mkdirp(path.dirname(destPath), function (err) {
-        if (err) {
-            callback(err);
-        }
-        else {
-            fs.writeFile(destPath, page.content, 'utf8', function (err) {
-                callback(err);
-            });
-        }
-    });
+    return mkdirp(path.dirname(destPath))
+        .then(fs.writeFileAsync(destPath, page.content, 'utf8'));
 };
 
 module.exports = Page;
