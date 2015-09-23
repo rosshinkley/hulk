@@ -1,7 +1,7 @@
-var _ = require('underscore');
+var _ = require('lodash');
 var path = require('path');
 var marked = require('marked');
-var underscoreTemplate = require('../templateEngines/underscore');
+var lodashTemplate = require('../templateEngines/lodash');
 
 // Set default markdown conversions options.
 marked.setOptions({
@@ -34,7 +34,7 @@ module.exports = {
         content = marked(content);
 
         // Render the content and return the output.
-        var output = underscoreTemplate.render(content, _.extend(data, templateHelpers));
+        var output = lodashTemplate.render(content, _.extend(data, templateHelpers));
         return output;
     }
 };

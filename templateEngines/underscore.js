@@ -1,7 +1,7 @@
-var _ = require('underscore');
+var _ = require('lodash');
 var path = require('path');
 
-// Make underscore template similar to mustache for aesthetics.
+// Make lodash template similar to mustache for aesthetics.
 _.templateSettings = _.defaults({
     interpolate: /\{\{\{([^\{\}]+)\}\}\}/g, // {{{ ... }}}
     escape     : /\{\{([^\{\}]+)\}\}/g // {{ ... }}

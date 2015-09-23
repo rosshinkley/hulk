@@ -2,7 +2,7 @@ var path = require('path');
 var fs = require('fs');
 var mkdirp = require('mkdirp');
 var util = require('util');
-var _ = require('underscore');
+var _ = require('lodash');
 
 var StaticFile = function (site, filePath) {
     this.site = site;

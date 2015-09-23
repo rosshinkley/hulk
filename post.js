@@ -1,6 +1,6 @@
 var path = require('path');
 var fm = require('front-matter');
-var _ = require('underscore');
+var _ = require('lodash');
 var moment = require('moment');
 var Page = require('./page');
 var util = require('util');

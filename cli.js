@@ -4,7 +4,7 @@ var path = require('path');
 var program = require('commander');
 var pjson = require('./package.json');
 var util = require('util');
-var _ = require('underscore');
+var _ = require('lodash');
 var util = require('util');
 
 // todo: investigate merging templateEngines and converters (basically dump templateEngines) they are basically the same thing...

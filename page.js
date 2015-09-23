@@ -2,7 +2,7 @@ var path = require('path');
 var fm = require('front-matter');
 var mkdirp = require('mkdirp');
 var fs = require('fs');
-var _ = require('underscore');
+var _ = require('lodash');
 var converters = require('./converters');
 
 var Page = function (site, filePath, content) {

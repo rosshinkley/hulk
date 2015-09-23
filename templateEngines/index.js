@@ -1,4 +1,4 @@
-var _ = require('underscore');
+var _ = require('lodash');
 
 // Import all known template engines.
 // Each engine must export a specific interface.
@@ -10,7 +10,7 @@ var _ = require('underscore');
  }
  */
 var engines = [
-    require('./underscore'),
+    require('./lodash'),
     require('./jade')
 ];
 

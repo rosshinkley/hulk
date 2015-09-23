@@ -1,4 +1,4 @@
-var _ = require('underscore');
+var _ = require('lodash');
 var jade = require('jade');
 var path = require('path');
 

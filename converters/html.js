@@ -1,6 +1,6 @@
-var _ = require('underscore');
+var _ = require('lodash');
 var path = require('path');
-var underscoreTemplate = require('../templateEngines/underscore');
+var lodashTemplate = require('../templateEngines/lodash');
 
 templateHelpers = require('../templateHelpers.js');
 
@@ -12,7 +12,7 @@ module.exports = {
 
     render: function(content, data) {
         // Render the content and return the output.
-        var output = underscoreTemplate.render(content, _.extend(data, templateHelpers));
+        var output = lodashTemplate.render(content, _.extend(data, templateHelpers));
         return output;
     }
 };

@@ -1,4 +1,4 @@
-var _ = require('underscore');
+var _ = require('lodash');
 
 // Import all known converters.
 // Converters do 2 things, convert from X format to HTML, and replace tokens in the source

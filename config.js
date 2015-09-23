@@ -1,7 +1,7 @@
 var fs = require('fs');
 var path = require('path');
 var yaml = require('yaml-js');
-var _ = require('underscore');
+var _ = require('lodash');
 
 // read config
 var defaults = {
