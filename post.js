@@ -1,9 +1,10 @@
-var path = require('path');
-var fm = require('front-matter');
-var _ = require('lodash');
-var moment = require('moment');
-var Page = require('./page');
-var util = require('util');
+var path = require('path'),
+    Promise = require('bluebird'),
+    fm = require('front-matter'),
+    _ = require('lodash'),
+    moment = require('moment'),
+    Page = require('./page'),
+    util = require('util');
 
 // Valid post file name regex.
 var MATCHER = /^(\d{4})-(\d{1,2})-(\d{1,2})-(.*)(\.[^.]+)$/
@@ -36,7 +37,7 @@ function getUrlFromPermalink(post) {
     return url;
 }
 
-var Post = function (site, filePath, content) {
+var Post = function(site, filePath, content) {
     Page.call(this, site, filePath, content);
 
     this.slug = parseSlug(filePath);
@@ -47,8 +48,7 @@ var Post = function (site, filePath, content) {
     if (this.templateData.date) {
         if (_.isDate(this.templateData.date)) {
             this.date = this.templateData.date;
-        }
-        else {
+        } else {
             // Parse the front-matter date as an ISO-8601 string.
             this.date = moment(this.templateData.date);
         }
@@ -56,7 +56,7 @@ var Post = function (site, filePath, content) {
 
     // Transform a space delimited category list into an array.
     if (typeof this.templateData.categories === 'string') {
-        this.templateData.categories = _.filter(this.templateData.categories.split(/\s+/), function (category) {
+        this.templateData.categories = _.filter(this.templateData.categories.split(/\s+/), function(category) {
             // Remove empty items from the array.
             return !!category;
         });
@@ -65,8 +65,7 @@ var Post = function (site, filePath, content) {
     // If a specific URL was specified in the front-matter then use that.
     if (this._originalFrontMatter.url) {
         this.templateData.url = this.url = this._originalFrontMatter.url;
-    }
-    else {
+    } else {
         // Else build a URL from the permalink template.
         this.templateData.url = this.url = getUrlFromPermalink(this);
     }
@@ -80,7 +79,7 @@ util.inherits(Post, Page);
 
 var p = Post.prototype;
 
-p.destination = function (destPath) {
+p.destination = function(destPath) {
 
     // Add 'index.html' to the URL if needed.
     var url = this.url;
@@ -93,7 +92,7 @@ p.destination = function (destPath) {
 
 // Post name validator. Post file names must be like:
 // 2008-11-05-my-awesome-post.markdown
-Post.isValid = function (fileName) {
+Post.isValid = function(fileName) {
     return MATCHER.test(path.basename(fileName));
 };
 
