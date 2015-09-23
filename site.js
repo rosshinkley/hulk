@@ -204,7 +204,7 @@ p.render = function() {
         })));
 };
 
-p.cleanup = function(callback) {
+p.cleanup = function() {
     var site = this;
     //remove orphaned files (files not in pages, posts, or staticFiles) and empty directories in destination
 
