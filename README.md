@@ -2,6 +2,13 @@
 
 Hulk is a blog focused static site generator, a la [Jekyll](http://jekyllrb.com).
 
+##Differences in this fork
+
+1. **Promises.** Hulk makes use of Bluebird to do the control flow.  Currently WIP.
+1. **Express exports.** Rather than starting an HTTP listener in-library, hulk exports an Express router.  Currently todo.
+1. **EJS support.** EJS has been added as a templating option.  Currently todo.
+
+
 ## Getting Started
 
 Hulk should be installed locally in your project.
