@@ -1,7 +1,6 @@
 var _ = require('lodash'),
     util = require('util'),
     path = require('path'),
-    fs = require('fs'),
     EventEmitter = require('events')
     .EventEmitter,
     iterateFiles = require('iterate-files'),
@@ -12,6 +11,8 @@ var _ = require('lodash'),
     minimatch = require('minimatch'),
     debug = require('debug')('hulk:site'),
     Promise = require('bluebird'),
+    fs = Promise.promisifyAll(require('fs')),
+    glob = Promise.promisify(require('glob')),
     rimraf = require('rimraf');
 
 var Site = function(config) {
@@ -30,32 +31,20 @@ var p = Site.prototype;
 
 // Read, process, and write this Site to output.
 p.process = function() {
-
-    var site = this;
-    site.reset();
-
-    debug('reading');
-    site.read(function() {
-
-        debug('rendering');
-        site.render(function() {
-
-            debug('cleaning');
-            site.cleanup(function() {
-
-                debug('writing');
-                site.write(function() {
-
-                    var totalFiles = site.posts.length + site.pages.length + site.staticFiles.length;
-
-                    debug('generated %d files', totalFiles);
-                    site.emit('processed', {
-                        filesChanged: totalFiles
-                    });
-                })
-            })
-        })
-    });
+    return site.reset()
+        .then(site.read())
+        .then(site.render())
+        .then(site.cleanup())
+        .then(site.write())
+        .then(function() {
+            return new Promise(function(resolve) {
+                var totalFiles = site.posts.length + site.pages.length + site.staticFiles.length;
+                debug('generated %d files', totalFiles);
+                return resolve({
+                    filesChanged: totalFiles
+                });
+            });
+        });
 };
 
 // Reset Site details.
@@ -78,142 +67,92 @@ p.reset = function() {
     });
 };
 
+
 // Read Site data from disk and load it into internal data structures.
+// returns a promise once site contents have been read in.
 p.read = function() {
-    return new Promise(function(resolve, reject) {
+    return glob(path.join(site.source, '**', '*'))
+        .then(function(files) {
+            return Promise.all(_.map(files, function(filePath) {
+                return new Promise(function(resolve, reject) {
+                    var relativePath = path.relative(site.source, filePath);
 
-        var queue = 0,
-            site = this,
-            queueLoaded = false;
-
-        function dequeue() {
-            queue--;
-            if (queueLoaded && queue === 0) {
-
-                // Sort posts into reverse chronological order.
-                site.posts.sort(function(a, b) {
-                    if (a.date > b.date)
-                        return -1;
-                    if (a.date < b.date)
-                        return 1;
-                    return 0;
-                });
-
-                // Add posts and pages to the site template data.
-                site.templateData.posts = _.pluck(site.posts, 'templateData');
-                site.templateData.pages = _.pluck(site.pages, 'templateData');
-
-                resolve(site);
-            }
-        }
-
-        iterateFiles(
-            site.source,
-            function(filePath) {
-
-                var relativePath = path.relative(site.source, filePath);
-
-                // Skip ignored files.
-                if (site.isIgnored(filePath)) {
-                    //debug('Ignored:', relativePath);
-                    return;
-                }
-
-                if (site.isLayout(filePath)) {
-                    queue++;
-
-                    var layoutName = path.basename(filePath, path.extname(filePath));
-                    //debug('Layout:', relativePath);
-
-                    fs.readFile(filePath, 'utf8', function(err, data) {
-                        if (err) {
-                            site.emit('error', err);
-                            return;
-                        }
-
-                        site.layouts[layoutName] = new Layout(site, filePath, data);
-
-                        dequeue();
-                    });
-                } else if (site.isPost(filePath)) {
-                    if (!Post.isValid(filePath)) {
-                        return;
+                    // Skip ignored files.
+                    if (site.isIgnored(filePath)) {
+                        //debug('Ignored:', relativePath);
+                        return resolve();
                     }
 
-                    queue++;
+                    if (site.isLayout(filePath)) {
+                        var layoutName = path.basename(filePath, path.extname(filePath));
+                        //debug('Layout:', relativePath);
 
-                    //debug('Post:', relativePath);
-
-                    fs.readFile(filePath, 'utf8', function(err, data) {
-                        if (err) {
-                            site.emit('error', err);
-                            return;
+                        fs.readFileAsync(filePath, 'utf8')
+                            .then(function(data) {
+                                site.layouts[layoutName] = new Layout(site, filePath, data);
+                                resolve();
+                            })
+                            .error(function(err) {
+                                return reject(err);
+                            });
+                    } else if (site.isPost(filePath)) {
+                        if (!Post.isValid(filePath)) {
+                            return resolve();
                         }
+                        //debug('Post:', relativePath);
+                        fs.readFileAsync(filePath, 'utf8')
+                            .then(function(data) {
+                                // Check for front-matter to determine if
+                                // this post should be included.
+                                // Posts without front-matter are ignored.
+                                if (data.substr(0, 3) === '---') {
+                                    var post = new Post(site, filePath, data);
+                                    if (post.published) {
+                                        site.posts.push(post);
+                                    }
+                                }
+                                resolve();
+                            })
+                            .error(function(err) {
+                                return reject(err);
+                            });
+                    } else {
+                        var reader = fs.createReadStream(filePath, {
+                            encoding: 'utf8'
+                        });
 
-                        // Check for front-matter to determine if
-                        // this post should be included.
-                        // Posts without front-matter are ignored.
-                        if (data.substr(0, 3) === '---') {
-                            var post = new Post(site, filePath, data);
-                            if (post.published) {
-                                site.posts.push(post);
+                        var isPage = false;
+                        var pageContent = '';
+
+                        reader.on('data', function(data) {
+                            // Check for front-matter to determine if
+                            // this is a page or static file.
+                            if (data.substr(0, 3) === '---') {
+                                //debug('Page:', relativePath);
+                                isPage = true;
+                                pageContent += data;
+                            } else {
+                                reader.destroy();
+
+                                //debug('Static File:', relativePath);
+                                site.staticFiles.push(new StaticFile(site, filePath));
+                                return resolve();
                             }
-                        }
+                        });
 
-                        dequeue();
-                    });
-                } else {
-                    queue++;
-
-                    var reader = fs.createReadStream(filePath, {
-                        encoding: 'utf8'
-                    });
-
-                    var isPage = false;
-                    var pageContent = '';
-
-                    reader.on('data', function(data) {
-                        // Check for front-matter to determine if
-                        // this is a page or static file.
-                        if (data.substr(0, 3) === '---') {
-                            //debug('Page:', relativePath);
-                            isPage = true;
-                            pageContent += data;
-                        } else {
-                            reader.destroy();
-
-                            //debug('Static File:', relativePath);
-                            site.staticFiles.push(new StaticFile(site, filePath));
-
-                            dequeue();
-                        }
-                    });
-
-                    reader.on('end', function() {
-                        if (isPage) {
-                            var page = new Page(site, filePath, pageContent);
-                            if (page.published) {
-                                site.pages.push(page);
+                        reader.on('end', function() {
+                            if (isPage) {
+                                var page = new Page(site, filePath, pageContent);
+                                if (page.published) {
+                                    site.pages.push(page);
+                                }
                             }
-                        }
-
-                        dequeue();
-                    });
-                }
-
-            },
-            function(err) {
-                if (err) {
-                    site.emit('error', err);
-                }
-
-                // Force the dequeue logic to run at least once
-                // incase there aren't any posts or pages.
-                queueLoaded = true;
-                queue++;
-                dequeue();
-            });
-    });
+                            return resolve();
+                        });
+                    }
+                });
+            }));
+        });
 };
 
 // Returns true or false whether the given file should be ignored.
@@ -255,53 +194,19 @@ p.isPost = function(filePath) {
 };
 
 // Render the posts and pages.
-p.render = function(callback) {
-    var queue = 0,
-        site = this,
-        queueLoaded = false;
-
-    function dequeue(err) {
-        if (err) {
-            site.emit('error', err);
-        }
-
-        queue--;
-        if (queueLoaded && queue === 0) {
-            callback();
-        }
-    }
-
-    var i;
-
-    for (i = 0; i < site.posts.length; i++) {
-        queue++;
-        site.posts[i].render(site.layouts, site.templateData, dequeue);
-    }
-    for (i = 0; i < site.pages.length; i++) {
-        queue++;
-        site.pages[i].render(site.layouts, site.templateData, dequeue);
-    }
-
-    // Force the dequeue logic to run at least once
-    // incase there aren't any posts or pages.
-    queueLoaded = true;
-    queue++;
-    dequeue();
+p.render = function() {
+    var site = this;
+    return Promise.all(site.posts.map(function(post) {
+            return post.render(site.layouts, site.templateData);
+        }))
+        .join(Promise.all(site.pages.map(function(page) {
+            return page.render(site.layouts, site.templateData);
+        })));
 };
 
 p.cleanup = function(callback) {
-    var queue = 0,
-        site = this,
-        queueLoaded = false;
-
-    function dequeue() {
-        queue--;
-        if (queueLoaded && queue === 0) {
-            callback();
-        }
-    }
-
-    // todo: remove orphaned files (files not in pages, posts, or staticFiles) and empty directories in destination
+    var site = this;
+    //remove orphaned files (files not in pages, posts, or staticFiles) and empty directories in destination
 
     // Build a list of the file paths we will be creating during the write step.
     var expectedFiles = _.union(
@@ -310,79 +215,37 @@ p.cleanup = function(callback) {
         _.pluck(site.staticFiles, 'filePath')
     );
 
-    // Deletes all empty directories under the given parent.
-    // Including directories that only contain other empty directories.
-    function deleteEmptyDirs(parentDir, callback) {
-        queue++;
-        queueLoaded = true;
-
-        rimraf(site.config.destination, function(err) {
-            if (err) {
-                site.emit('error', err);
-            }
-
-            dequeue();
-        });
-    }
-
-    // Delete all extraneous files in the destination directory.
-    iterateFiles(
-        site.config.destination,
-        function(filePath) {
-            if (_.indexOf(expectedFiles, filePath) === -1) {
-                queue++;
-                fs.unlink(filePath, function(err) {
-                    dequeue();
+    glob(path.join(site.config.destination, '**', '*'))
+        .then(function(files) {
+            Promise.all(_.map(files, function(filePath) {
+                return new Promise(function(resolve, reject) {
+                    if (_.indexOf(expectedFiles, filepath) === -1) {
+                        return fs.unlinkAsync(filePath)
+                            .then(function() {
+                                //todo: emit about cleanup
+                                //todo: check directory for empty
+                                return resolve();
+                            })
+                            .error(function(err) {
+                                return reject(err);
+                            });
+                    } else {
+                        return resolve();
+                    }
                 });
-            }
-        },
-        function(err) {
-            if (err) {
-                site.emit('error', err);
-            }
-
-            deleteEmptyDirs(site.config.destination, callback);
-        }
-    );
+            }));
+        });
 };
 
 // Write the posts, pages, and static files to the destination folder.
-p.write = function(callback) {
-    var queue = 0,
-        site = this,
-        queueLoaded = false;
-
-    function dequeue(err) {
-        if (err) {
-            site.emit('error', err);
-        }
-
-        queue--;
-        if (queueLoaded && queue === 0) {
-            callback();
-        }
-    }
-
-    var i;
-
-    for (i = 0; i < site.posts.length; i++) {
-        queue++;
-        site.posts[i].write(site.config.destination, dequeue);
-    }
-    for (i = 0; i < site.pages.length; i++) {
-        queue++;
-        site.pages[i].write(site.config.destination, dequeue);
-    }
-    for (i = 0; i < this.staticFiles.length; i++) {
-        queue++;
-        site.staticFiles[i].write(site.config.destination, dequeue);
-    }
-
-    // Force the dequeue logic to run at least once
-    // incase there aren't any posts or pages.
-    queueLoaded = true;
-    queue++;
-    dequeue();
+p.write = function() {
+    var site = this;
+    return Promise.all(site.posts.map(function(post) {
+            return post.write(site.layouts, site.templateData);
+        }))
+        .join(Promise.all(site.pages.map(function(page) {
+            return page.write(site.layouts, site.templateData);
+        })));
 };
 
 module.exports = Site;
