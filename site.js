@@ -1,18 +1,20 @@
-var _ = require('lodash');
-var util = require('util');
-var path = require('path');
-var fs = require('fs');
-var EventEmitter = require('events').EventEmitter;
-var iterateFiles = require('iterate-files');
-var Layout = require('./layout');
-var Post = require('./post');
-var Page = require('./page');
-var StaticFile = require('./staticFile');
-var minimatch = require('minimatch');
-var debug = require('debug')('hulk:site');
-var rimraf = require('rimraf');
+var _ = require('lodash'),
+    util = require('util'),
+    path = require('path'),
+    fs = require('fs'),
+    EventEmitter = require('events')
+    .EventEmitter,
+    iterateFiles = require('iterate-files'),
+    Layout = require('./layout'),
+    Post = require('./post'),
+    Page = require('./page'),
+    StaticFile = require('./staticFile'),
+    minimatch = require('minimatch'),
+    debug = require('debug')('hulk:site'),
+    Promise = require('bluebird'),
+    rimraf = require('rimraf');
 
-var Site = function (config) {
+var Site = function(config) {
     this.config = config;
     this.source = this.config.source;
     this.permalink = this.config.permalink;
@@ -27,22 +29,22 @@ util.inherits(Site, EventEmitter);
 var p = Site.prototype;
 
 // Read, process, and write this Site to output.
-p.process = function () {
+p.process = function() {
 
     var site = this;
     site.reset();
 
     debug('reading');
-    site.read(function () {
+    site.read(function() {
 
         debug('rendering');
-        site.render(function () {
+        site.render(function() {
 
             debug('cleaning');
-            site.cleanup(function () {
+            site.cleanup(function() {
 
                 debug('writing');
-                site.write(function () {
+                site.write(function() {
 
                     var totalFiles = site.posts.length + site.pages.length + site.staticFiles.length;
 
@@ -57,169 +59,172 @@ p.process = function () {
 };
 
 // Reset Site details.
-p.reset = function () {
-    this.layouts = {};
-    this.posts = [];
-    this.pages = [];
-    this.staticFiles = [];
+p.reset = function() {
+    var self = this;
+    return new Promise(function(resolve, reject) {
+        self.layouts = {};
+        self.posts = [];
+        self.pages = [];
+        self.staticFiles = [];
 
-    this.templateData = _.defaults({
-        time : new Date(),
-        url  : this.config.url,
-        posts: [],
-        pages: []
-    }, this.config.global);
+        self.templateData = _.defaults({
+            time: new Date(),
+            url: self.config.url,
+            posts: [],
+            pages: []
+        }, self.config.global);
+
+        resolve(self);
+    });
 };
 
 // Read Site data from disk and load it into internal data structures.
-p.read = function (callback) {
+p.read = function() {
+    return new Promise(function(resolve, reject) {
 
-    var queue = 0,
-        site = this,
-        queueLoaded = false;
+        var queue = 0,
+            site = this,
+            queueLoaded = false;
 
-    function dequeue() {
-        queue--;
-        if (queueLoaded && queue === 0) {
+        function dequeue() {
+            queue--;
+            if (queueLoaded && queue === 0) {
 
-            // Sort posts into reverse chronological order.
-            site.posts.sort(function (a, b) {
-                if (a.date > b.date)
-                    return -1;
-                if (a.date < b.date)
-                    return 1;
-                return 0;
-            });
-
-            // Add posts and pages to the site template data.
-            site.templateData.posts = _.pluck(site.posts, 'templateData');
-            site.templateData.pages = _.pluck(site.pages, 'templateData');
-
-            callback();
-        }
-    }
-
-    iterateFiles(
-        site.source,
-        function (filePath) {
-
-            var relativePath = path.relative(site.source, filePath);
-
-            // Skip ignored files.
-            if (site.isIgnored(filePath)) {
-                //debug('Ignored:', relativePath);
-                return;
-            }
-
-            if (site.isLayout(filePath)) {
-                queue++;
-
-                var layoutName = path.basename(filePath, path.extname(filePath));
-                //debug('Layout:', relativePath);
-
-                fs.readFile(filePath, 'utf8', function (err, data) {
-                    if (err) {
-                        site.emit('error', err);
-                        return;
-                    }
-
-                    site.layouts[layoutName] = new Layout(site, filePath, data);
-
-                    dequeue();
+                // Sort posts into reverse chronological order.
+                site.posts.sort(function(a, b) {
+                    if (a.date > b.date)
+                        return -1;
+                    if (a.date < b.date)
+                        return 1;
+                    return 0;
                 });
+
+                // Add posts and pages to the site template data.
+                site.templateData.posts = _.pluck(site.posts, 'templateData');
+                site.templateData.pages = _.pluck(site.pages, 'templateData');
+
+                resolve(site);
             }
-            else if (site.isPost(filePath)) {
-                if (!Post.isValid(filePath)) {
+        }
+
+        iterateFiles(
+            site.source,
+            function(filePath) {
+
+                var relativePath = path.relative(site.source, filePath);
+
+                // Skip ignored files.
+                if (site.isIgnored(filePath)) {
+                    //debug('Ignored:', relativePath);
                     return;
                 }
 
-                queue++;
+                if (site.isLayout(filePath)) {
+                    queue++;
 
-                //debug('Post:', relativePath);
+                    var layoutName = path.basename(filePath, path.extname(filePath));
+                    //debug('Layout:', relativePath);
 
-                fs.readFile(filePath, 'utf8', function (err, data) {
-                    if (err) {
-                        site.emit('error', err);
+                    fs.readFile(filePath, 'utf8', function(err, data) {
+                        if (err) {
+                            site.emit('error', err);
+                            return;
+                        }
+
+                        site.layouts[layoutName] = new Layout(site, filePath, data);
+
+                        dequeue();
+                    });
+                } else if (site.isPost(filePath)) {
+                    if (!Post.isValid(filePath)) {
                         return;
                     }
 
-                    // Check for front-matter to determine if
-                    // this post should be included.
-                    // Posts without front-matter are ignored.
-                    if (data.substr(0, 3) === '---') {
-                        var post = new Post(site, filePath, data);
-                        if (post.published) {
-                            site.posts.push(post);
+                    queue++;
+
+                    //debug('Post:', relativePath);
+
+                    fs.readFile(filePath, 'utf8', function(err, data) {
+                        if (err) {
+                            site.emit('error', err);
+                            return;
                         }
-                    }
 
-                    dequeue();
-                });
-            }
-            else {
-                queue++;
-
-                var reader = fs.createReadStream(filePath, {
-                    encoding: 'utf8'
-                });
-
-                var isPage = false;
-                var pageContent = '';
-
-                reader.on('data', function (data) {
-                    // Check for front-matter to determine if
-                    // this is a page or static file.
-                    if (data.substr(0, 3) === '---') {
-                        //debug('Page:', relativePath);
-                        isPage = true;
-                        pageContent += data;
-                    }
-                    else {
-                        reader.destroy();
-
-                        //debug('Static File:', relativePath);
-                        site.staticFiles.push(new StaticFile(site, filePath));
+                        // Check for front-matter to determine if
+                        // this post should be included.
+                        // Posts without front-matter are ignored.
+                        if (data.substr(0, 3) === '---') {
+                            var post = new Post(site, filePath, data);
+                            if (post.published) {
+                                site.posts.push(post);
+                            }
+                        }
 
                         dequeue();
-                    }
-                });
+                    });
+                } else {
+                    queue++;
 
-                reader.on('end', function () {
-                    if (isPage) {
-                        var page = new Page(site, filePath, pageContent);
-                        if (page.published) {
-                            site.pages.push(page);
+                    var reader = fs.createReadStream(filePath, {
+                        encoding: 'utf8'
+                    });
+
+                    var isPage = false;
+                    var pageContent = '';
+
+                    reader.on('data', function(data) {
+                        // Check for front-matter to determine if
+                        // this is a page or static file.
+                        if (data.substr(0, 3) === '---') {
+                            //debug('Page:', relativePath);
+                            isPage = true;
+                            pageContent += data;
+                        } else {
+                            reader.destroy();
+
+                            //debug('Static File:', relativePath);
+                            site.staticFiles.push(new StaticFile(site, filePath));
+
+                            dequeue();
                         }
-                    }
+                    });
 
-                    dequeue();
-                });
-            }
+                    reader.on('end', function() {
+                        if (isPage) {
+                            var page = new Page(site, filePath, pageContent);
+                            if (page.published) {
+                                site.pages.push(page);
+                            }
+                        }
 
-        },
-        function (err) {
-            if (err) {
-                site.emit('error', err);
-            }
+                        dequeue();
+                    });
+                }
 
-            // Force the dequeue logic to run at least once
-            // incase there aren't any posts or pages.
-            queueLoaded = true;
-            queue++;
-            dequeue();
-        });
+            },
+            function(err) {
+                if (err) {
+                    site.emit('error', err);
+                }
 
+                // Force the dequeue logic to run at least once
+                // incase there aren't any posts or pages.
+                queueLoaded = true;
+                queue++;
+                dequeue();
+            });
+    });
 };
 
 // Returns true or false whether the given file should be ignored.
-p.isIgnored = function (filePath) {
+p.isIgnored = function(filePath) {
     var relativePath = path.relative(this.source, filePath);
 
     var ignoreList = this.config.ignore;
     for (var i = 0; i < ignoreList.length; i++) {
         var pattern = ignoreList[i];
         if (minimatch(relativePath, pattern, {
-            dot      : true,
+            dot: true,
             nocomment: true
         })) {
             return true;
@@ -230,27 +235,27 @@ p.isIgnored = function (filePath) {
 };
 
 // Returns true or false whether the given file is in the layout folder.
-p.isLayout = function (filePath) {
+p.isLayout = function(filePath) {
     var relativePath = path.relative(this.source, filePath);
     var layoutGlob = path.join(this.config.layouts, '**');
     return minimatch(relativePath, layoutGlob, {
-        dot      : true,
+        dot: true,
         nocomment: true
     });
 };
 
 // Returns true or false whether the given file is in the posts folder.
-p.isPost = function (filePath) {
+p.isPost = function(filePath) {
     var relativePath = path.relative(this.source, filePath);
     var postsGlob = path.join(this.config.posts, '**');
     return minimatch(relativePath, postsGlob, {
-        dot      : true,
+        dot: true,
         nocomment: true
     });
 };
 
 // Render the posts and pages.
-p.render = function (callback) {
+p.render = function(callback) {
     var queue = 0,
         site = this,
         queueLoaded = false;
@@ -284,7 +289,7 @@ p.render = function (callback) {
     dequeue();
 };
 
-p.cleanup = function (callback) {
+p.cleanup = function(callback) {
     var queue = 0,
         site = this,
         queueLoaded = false;
@@ -311,7 +316,7 @@ p.cleanup = function (callback) {
         queue++;
         queueLoaded = true;
 
-        rimraf(site.config.destination, function (err) {
+        rimraf(site.config.destination, function(err) {
             if (err) {
                 site.emit('error', err);
             }
@@ -323,15 +328,15 @@ p.cleanup = function (callback) {
     // Delete all extraneous files in the destination directory.
     iterateFiles(
         site.config.destination,
-        function (filePath) {
+        function(filePath) {
             if (_.indexOf(expectedFiles, filePath) === -1) {
                 queue++;
-                fs.unlink(filePath, function (err) {
+                fs.unlink(filePath, function(err) {
                     dequeue();
                 });
             }
         },
-        function (err) {
+        function(err) {
             if (err) {
                 site.emit('error', err);
             }
@@ -342,7 +347,7 @@ p.cleanup = function (callback) {
 };
 
 // Write the posts, pages, and static files to the destination folder.
-p.write = function (callback) {
+p.write = function(callback) {
     var queue = 0,
         site = this,
         queueLoaded = false;
