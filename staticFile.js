@@ -28,8 +28,6 @@ p.write = function(destination) {
 // http://stackoverflow.com/a/14387791/31308
 function copyFile(source, target) {
     return new Promise(function(resolve, reject) {
-        var callbackCalled = false;
-
         var rd = fs.createReadStream(source);
         rd.on("error", function(err) {
             reject(err);
