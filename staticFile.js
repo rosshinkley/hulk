@@ -1,61 +1,50 @@
-var path = require('path');
-var fs = require('fs');
-var mkdirp = require('mkdirp');
-var util = require('util');
-var _ = require('lodash');
+var path = require('path'),
+    Promise = require('bluebird'),
+    fs = Promise.promisifyAll(('fs')),
+    mkdirp = Promise.promisify(require('mkdirp')),
+    util = require('util'),
+    _ = require('lodash');
 
-var StaticFile = function (site, filePath) {
+var StaticFile = function(site, filePath) {
     this.site = site;
     this.filePath = filePath;
 };
 
 var p = StaticFile.prototype;
 
-p.destination = function (destPath) {
+p.destination = function(destPath) {
     var rel = path.relative(this.site.source, this.filePath);
     return path.join(this.site.source, path.join(destPath, rel));
 };
 
-p.write = function (destination, callback) {
-    var destPath = this.destination(destination);
-    var filePath = this.filePath;
-    mkdirp(path.dirname(destPath), function (err) {
-        if (err) {
-            callback(err);
-        }
-        else {
-            copyFile(filePath, destPath, function (err) {
-                callback(err);
-            });
-        }
-    });
+p.write = function(destination) {
+    var destPath = this.destination(destination),
+        filePath = this.filePath;
+
+    return mkdirp(path.dirname(destPath))
+        .then(copyFile(filePath, destPath));
 };
 
 // http://stackoverflow.com/a/14387791/31308
-function copyFile(source, target, callback) {
-    var callbackCalled = false;
+function copyFile(source, target) {
+    return new Promise(function(resolve, reject) {
+        var callbackCalled = false;
 
-    var rd = fs.createReadStream(source);
-    rd.on("error", function (err) {
-        done(err);
+        var rd = fs.createReadStream(source);
+        rd.on("error", function(err) {
+            reject(err);
+        });
+
+        var wr = fs.createWriteStream(target);
+        wr.on("error", function(err) {
+            reject(err);
+        });
+        wr.on("close", function(ex) {
+            resolve()
+        });
+
+        rd.pipe(wr);
     });
-
-    var wr = fs.createWriteStream(target);
-    wr.on("error", function (err) {
-        done(err);
-    });
-    wr.on("close", function (ex) {
-        done();
-    });
-
-    rd.pipe(wr);
-
-    function done(err) {
-        if (!callbackCalled) {
-            callback(err);
-            callbackCalled = true;
-        }
-    }
 }
 
 module.exports = StaticFile;
